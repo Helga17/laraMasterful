@@ -30,14 +30,47 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
 Route::get('/schedules', function () {
-    return Schedule::with(['users', 'master'])
-        ->where('start_date', '>=', Carbon\Carbon::now())
-        ->orderBy('start_date','ASC')
-        ->get();
+    $schedules = Schedule::with(['users', 'master'])
+    ->where('start_date', '>=', Carbon\Carbon::now())
+    ->orderBy('start_date','ASC')
+    ->get();
+
+    $authUser = auth()->guard('api')->user();
+
+    foreach ($schedules as $schedule) {
+        if (!$authUser || !$schedule->users->count()) {
+            $schedule['is_assigned'] = false;
+        } else {
+            foreach ($schedule->users as $user) {
+                if ($user->id === $authUser->id) {
+                    $schedule['is_assigned'] = true;
+                }
+            }
+        }
+
+        $schedule['current_count_members'] = $schedule->users->count();
+
+        unset($schedule->users);
+    }
+
+    return $schedules;
 });
 
-Route::get('dashboard/schedules', function (Request $request) {
-    return Schedule::with(['users', 'master'])->get();
+Route::get('/user-schedules', function () {
+    $authUser = auth()->guard('api')->user();
+
+    if (!$authUser) {
+        return response()->json();
+    }
+
+    $schedules = Schedule::with('master')
+        ->join('user_schedule', 'schedule_id', '=', 'schedules.id')
+        ->where('user_id', '=', $authUser->id)
+        ->orderBy('start_date', 'asc')
+        ->get();
+        
+    // return response()->json($authUser->schedules->values());
+    return response()->json($schedules);
 });
 
 Route::get('/masters', function () {
@@ -73,7 +106,7 @@ Route::delete('/master/{id}', function(int $id, Request $request){
     return response()->json();
 });
 
-Route::delete('/dashboard/schedule/{id}', function(int $id, Request $request){
+Route::delete('/schedule/{id}', function(int $id, Request $request){
     $schedule = Schedule::find($id);
 
     if ($schedule) {
@@ -98,7 +131,6 @@ Route::post('/posts', function (Request $request) {
             'image' => $path
         ]);
     }
-    
 
     $data = [
         'success' => true,
@@ -142,14 +174,22 @@ Route::post('/masters', function (Request $request) {
     return response()->json($data);
 });
 
-Route::post('schedules/assign', function (Request $request) {
-    dd(auth()->user());
+Route::middleware('auth:api')->post('schedules/{id}/assign', function (int $id, Request $request) {
     $userId = $request->user()->id ?? null;
-    dd($userId);
-    $scheduleId = $request->input('schedule_id');
 
+    $schedule = Schedule::findOrFail($id);
 
-    // store to database;
-    // schedule id user assign
-    // проверка в фориче
+    $schedule->users()->attach($userId);
+
+    return response()->json();
+});
+
+Route::middleware('auth:api')->post('schedules/{id}/unassign', function (int $id, Request $request) {
+    $userId = $request->user()->id ?? null;
+
+    $schedule = Schedule::findOrFail($id);
+
+    $schedule->users()->detach($userId);
+
+    return response()->json();
 });
